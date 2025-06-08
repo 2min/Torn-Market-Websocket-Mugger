@@ -49,97 +49,108 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
         const data = JSON.parse(params.response.payloadData);
 
         // We're monitoring a specific item, ignore all other websocket messages
-        if (data?.result?.channel === "item-market_"+monitoringItemID) {
+        if (data?.push?.channel === "item-market_"+monitoringItemID) {
 
-            const message = data.result.data.data.message;
+            const message = data.push.pub.data.message;
 
             // Websocket - new item added!
             if (message?.action === 'add') {
-              // {"channel":"item-market_206","message":{"namespace":"item-market","action":"add","data":{"ID":13686343,"anonymous":false,"status":"online","user":{"ID":3533826,"name":"GirthControl","honorID":1076,"honorStyle":"default"},"faction":{"ID":11376,"name":"AI","imageUrl":"https://factiontags.torn.com/11376-45863.png","rank":"gold"},"price":795000,"available":2}}}
-              const listingData = message.data;
-              if (listingData) {
-                const itemDetails = {
-                  listingID: listingData.ID,
-                  price: listingData.price,
-                  sellerID: listingData.user?.ID || 0,
-                  available: listingData.available,
-                };
-                console.log('[Listing Added]', { ...itemDetails, timestamp: Math.floor(Date.now() / 1000) });
-                monitoredItems[itemDetails.listingID] = itemDetails;
-                console.log("New item stored successfully:", itemDetails);
+              // Handle both array and object formats
+              const additions = Array.isArray(message.data) ? message.data : [message.data];
+              
+              for (const listingData of additions) {
+                if (listingData) {
+                  const itemDetails = {
+                    listingID: listingData.ID,
+                    price: listingData.price,
+                    sellerID: listingData.user?.ID || 0,
+                    available: listingData.available,
+                  };
+                  console.log('[Listing Added]', { ...itemDetails, timestamp: Math.floor(Date.now() / 1000) });
+                  monitoredItems[itemDetails.listingID] = itemDetails;
+                  console.log("New item stored successfully:", itemDetails);
+                }
               }
             }
 
             // Websocket - item removed!
             if (message?.action === 'remove') {
-              // {"channel":"item-market_206","message":{"namespace":"item-market","action":"remove","data":{"listingID":13686343}}}
-              const listingID = message.data.listingID;
-              try {
-                const item = monitoredItems[listingID];
-                if (item) {
-                  var total_dollars = item.available * item.price;
+              // Handle both array and object formats
+              const removals = Array.isArray(message.data) ? message.data : [message.data];
+              
+              for (const removeData of removals) {
+                const listingID = removeData.listingID;
+                try {
+                  const item = monitoredItems[listingID];
+                  if (item) {
+                    var total_dollars = item.available * item.price;
 
-                  console.log('[Listing Removed]', Math.floor(Date.now() / 1000), {
-                    listingID: item.listingID,
-                    price: item.price,
-                    sellerID: item.sellerID,
-                    available: item.available,
-                    total_dollars: total_dollars,
-                    'over_20m': total_dollars > 20000000,
-                    timestamp: Math.floor(Date.now() / 1000)
-                  });
+                    console.log('[Listing Removed]', Math.floor(Date.now() / 1000), {
+                      listingID: item.listingID,
+                      price: item.price,
+                      sellerID: item.sellerID,
+                      available: item.available,
+                      total_dollars: total_dollars,
+                      'over_20m': total_dollars > 20000000,
+                      timestamp: Math.floor(Date.now() / 1000)
+                    });
 
-                  await do_mug_notification(item, total_dollars);
-                  
-                  // Delete the item
-                  delete monitoredItems[listingID];
+                    await do_mug_notification(item, total_dollars);
+                    
+                    // Delete the item
+                    delete monitoredItems[listingID];
 
-                } else {
-                  console.log('[Listing Removed] No entry found for listingID:', listingID);
+                  } else {
+                    console.log('[Listing Removed] No entry found for listingID:', listingID);
+                  }
+                } catch (error) {
+                  console.error('[Listing Removed] Error retrieving listing data:', error);
                 }
-              } catch (error) {
-                console.error('[Listing Removed] Error retrieving listing data:', error);
               }
             }
 
             // Websocket - item updated!
             if (message?.action === 'update') {
-              // {"channel":"item-market_206","message":{"namespace":"item-market","action":"update","data":{"listingID":13685914,"available":273}}}
-              const listingID = message.data.listingID;
-              // No listing ID in payload, e.g. is of this form: { "namespace": "item-market", "action": "update", "data": { "itemID": 206, "minPrice": 821000 } }
-              if(listingID) {
-                try {
-                  const item = monitoredItems[listingID];
-                  if (item) {
-                    var how_many_removed = item.available - message.data.available;
-                    var total_dollars = how_many_removed * item.price;
+              // Handle both array and object formats
+              const updates = Array.isArray(message.data) ? message.data : [message.data];
+              
+              for (const updateData of updates) {
+                const listingID = updateData.listingID;
+                // No listing ID in payload, e.g. is of this form: { "itemID": 206, "minPrice": 821000 }
+                if(listingID) {
+                  try {
+                    const item = monitoredItems[listingID];
+                    if (item) {
+                      var how_many_removed = item.available - updateData.available;
+                      var total_dollars = how_many_removed * item.price;
 
-                    console.log('[Listing Updated]', Math.floor(Date.now() / 1000), {
-                      listingID: item.listingID,
-                      price: item.price,
-                      sellerID: item.sellerID,
-                      available: message.data.available,
-                      total_dollars: total_dollars,
-                      'over_20m': total_dollars > 20000000,
-                      'how_many_removed': how_many_removed,
-                      timestamp: Math.floor(Date.now() / 1000)
-                    });
+                      console.log('[Listing Updated]', Math.floor(Date.now() / 1000), {
+                        listingID: item.listingID,
+                        price: item.price,
+                        sellerID: item.sellerID,
+                        available: updateData.available,
+                        total_dollars: total_dollars,
+                        'over_20m': total_dollars > 20000000,
+                        'how_many_removed': how_many_removed,
+                        timestamp: Math.floor(Date.now() / 1000)
+                      });
 
-                    await do_mug_notification(item, total_dollars);
+                      await do_mug_notification(item, total_dollars);
 
-                    // Update the stored item with new available quantity
-                    monitoredItems[listingID] = {
-                      listingID: item.listingID,
-                      price: item.price,
-                      sellerID: item.sellerID,
-                      available: message.data.available
-                    };
+                      // Update the stored item with new available quantity
+                      monitoredItems[listingID] = {
+                        listingID: item.listingID,
+                        price: item.price,
+                        sellerID: item.sellerID,
+                        available: updateData.available
+                      };
 
-                  } else {
-                    console.log('[Listing Updated] No entry found for listingID:', listingID);
+                    } else {
+                      console.log('[Listing Updated] No entry found for listingID:', listingID);
+                    }
+                  } catch (error) {
+                    console.error('[Listing Updated] Error retrieving listing data:', error);
                   }
-                } catch (error) {
-                  console.error('[Listing Updated] Error retrieving listing data:', error);
                 }
               }
             }
@@ -186,15 +197,15 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
             if (responseData?.list && Array.isArray(responseData.list)) {
               const currentTime = Math.floor(Date.now() / 1000);
               for (const listingData of responseData.list) {
-                if (listingData.ID) {
+                if (listingData.listingID) {
                   const itemDetails = {
-                    listingID: listingData.ID,
+                    listingID: listingData.listingID,
                     price: listingData.price,
                     sellerID: listingData.user?.ID || 0,
                     available: listingData.available,
                   };
                   monitoredItems[itemDetails.listingID] = itemDetails;
-                  console.log(`[getListing] Processed item: ListingID ${listingData.ID}, SellerID ${itemDetails.sellerID}`);
+                  console.log(`[getListing] Processed item: ListingID ${listingData.listingID}, SellerID ${itemDetails.sellerID}`);
                 }
               }
             }
